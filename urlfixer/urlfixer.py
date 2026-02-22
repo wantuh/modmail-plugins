@@ -1,75 +1,79 @@
+import re
 import discord
 from discord.ext import commands
 
 class LogURLFixer(commands.Cog):
-    """A plugin to fix the log URL generation by intercepting and replacing the hardcoded /logs/ segment."""
+    """A plugin to fix the log URL generation by intercepting the hardcoded /logs/ segment."""
     
     def __init__(self, bot):
         self.bot = bot
         
-        self._original_send = discord.abc.Messageable.send
+        self._original_msg_send = discord.abc.Messageable.send
+        self._original_wh_send = discord.Webhook.send
         
-        _bot = self.bot
         _plugin_self = self
         
-        async def custom_send(messageable_self, *args, **kwargs):
-            try:
-                prefix = _bot.config.get('log_url_prefix', '').strip('/')
-            except Exception:
-                prefix = ''
+        self.url_pattern = re.compile(r"(/logs/[^/]+)/logs/")
+        
+        async def custom_msg_send(messageable_self, *args, **kwargs):
+            args, kwargs = _plugin_self._clean_payload(args, kwargs)
+            return await self._original_msg_send(messageable_self, *args, **kwargs)
+
+        async def custom_wh_send(webhook_self, *args, **kwargs):
+            args, kwargs = _plugin_self._clean_payload(args, kwargs)
+            return await self._original_wh_send(webhook_self, *args, **kwargs)
+
+        discord.abc.Messageable.send = custom_msg_send
+        discord.Webhook.send = custom_wh_send
+
+    def _clean_payload(self, args, kwargs):
+        """Finds and replaces the bad URL pattern in message content and embeds."""
+        if args and isinstance(args[0], str):
+            args = (self.url_pattern.sub(r"\1/", args[0]),) + args[1:]
+            
+        if 'content' in kwargs and isinstance(kwargs['content'], str):
+            kwargs['content'] = self.url_pattern.sub(r"\1/", kwargs['content'])
+            
+        if 'embed' in kwargs and kwargs['embed']:
+            self._fix_embed(kwargs['embed'])
+            
+        if 'embeds' in kwargs and kwargs['embeds']:
+            for e in kwargs['embeds']:
+                self._fix_embed(e)
                 
-            if prefix and prefix != 'NONE':
-                bad_str = f"{prefix}/logs/"
-                good_str = f"{prefix}/"
-                
-                if args and isinstance(args[0], str) and bad_str in args[0]:
-                    args = (args[0].replace(bad_str, good_str),) + args[1:]
-                    
-                if 'content' in kwargs and isinstance(kwargs['content'], str) and bad_str in kwargs['content']:
-                    kwargs['content'] = kwargs['content'].replace(bad_str, good_str)
-                    
-                if 'embed' in kwargs and kwargs['embed']:
-                    _plugin_self._fix_embed(kwargs['embed'], bad_str, good_str)
-                    
-                if 'embeds' in kwargs and kwargs['embeds']:
-                    for e in kwargs['embeds']:
-                        _plugin_self._fix_embed(e, bad_str, good_str)
+        return args, kwargs
 
-            return await self._original_send(messageable_self, *args, **kwargs)
-
-        discord.abc.Messageable.send = custom_send
-
-    def _fix_embed(self, embed, bad_str, good_str):
+    def _fix_embed(self, embed):
         """Helper function to find and replace the bad URL inside Discord embeds."""
         try:
-            if isinstance(embed.url, str) and bad_str in embed.url:
-                embed.url = embed.url.replace(bad_str, good_str)
-            if isinstance(embed.description, str) and bad_str in embed.description:
-                embed.description = embed.description.replace(bad_str, good_str)
-            if isinstance(embed.title, str) and bad_str in embed.title:
-                embed.title = embed.title.replace(bad_str, good_str)
+            if isinstance(embed.url, str):
+                embed.url = self.url_pattern.sub(r"\1/", embed.url)
+            if isinstance(embed.description, str):
+                embed.description = self.url_pattern.sub(r"\1/", embed.description)
+            if isinstance(embed.title, str):
+                embed.title = self.url_pattern.sub(r"\1/", embed.title)
             
-            if getattr(embed.author, 'url', None) and isinstance(embed.author.url, str) and bad_str in embed.author.url:
+            if getattr(embed.author, 'url', None) and isinstance(embed.author.url, str):
                 embed.set_author(
                     name=embed.author.name, 
-                    url=embed.author.url.replace(bad_str, good_str), 
+                    url=self.url_pattern.sub(r"\1/", embed.author.url), 
                     icon_url=embed.author.icon_url
                 )
                 
             for i, field in enumerate(embed.fields):
-                if isinstance(field.value, str) and bad_str in field.value:
+                if isinstance(field.value, str):
                     embed.set_field_at(
                         i, 
                         name=field.name, 
-                        value=field.value.replace(bad_str, good_str), 
+                        value=self.url_pattern.sub(r"\1/", field.value), 
                         inline=field.inline
                     )
         except Exception:
             pass
 
     def cog_unload(self):
-        discord.abc.Messageable.send = self._original_send
-
+        discord.abc.Messageable.send = self._original_msg_send
+        discord.Webhook.send = self._original_wh_send
 
 async def setup(bot):
     await bot.add_cog(LogURLFixer(bot))
