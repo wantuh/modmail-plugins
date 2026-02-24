@@ -1,0 +1,12 @@
+{
+    "name": "ConfigRefresh",
+    "description": [
+        "Config Refresh plugin.",
+        "\nAdds a `configrefresh` command that re-pulls the bot configuration from the database without requiring a restart."
+    ],
+    "author": "wantuh",
+    "version": "1.0.0",
+    "bot_version": "4.0.2",
+    "dpy_version": "2.2.3",
+    "requirements": []
+}
